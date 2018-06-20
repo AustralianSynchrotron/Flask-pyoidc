@@ -66,57 +66,56 @@ class _Session(object):
         return self._refresh_time() < time.time()
 
 
-class OIDCAuthentication(object):
-    """OIDCAuthentication object for Flask extension.
+def __init__(self, app=None, client_registration_info=None,
+             issuer=None, provider_configuration_info=None,
+             userinfo_endpoint_method='POST',
+             extra_request_args=None):
+    self.app = app
+    self.userinfo_endpoint_method = userinfo_endpoint_method
+    self.extra_request_args = extra_request_args or {}
+    self.client = Client(client_authn_method=CLIENT_AUTHN_METHOD)
+    self.client_registration_info = {}
 
-    Takes a Flask app object, client, registration info,
-    provider configuration, and supports optional extra request args to the
-    OIDC identity provider.
-    """
+    # get stuff from the app's config, which may override stuff set above
+    if app is not None:
+        self.init_app(app, client_registration_info, issuer, provider_configuration_info)
 
-    def __init__(self, flask_app, client_registration_info=None,
-                 issuer=None, provider_configuration_info=None,
-                 userinfo_endpoint_method='POST',
-                 extra_request_args=None):
-        self.app = flask_app
-        self.userinfo_endpoint_method = userinfo_endpoint_method
-        self.extra_request_args = extra_request_args or {}
+    self.logout_view = None
+    self._error_view = None
 
-        self.client = Client(client_authn_method=CLIENT_AUTHN_METHOD)
 
-        # Raise exception if oic auth will fail based on lack of data.
-        if not issuer and not provider_configuration_info:
-            raise ValueError(
-                'Either \'issuer\' (for dynamic discovery) or provider_configuration_info'
-                ' for static configuration must be specified.'
-            )
-        # If only issuer provided assume discovery and initalize anyway.
-        if issuer and not provider_configuration_info:
-            self.client.provider_config(issuer)
-        else:
-            # Otherwise assume non-discovery for oidc
-            self.client.handle_provider_config(
-                ProviderConfigurationResponse(**provider_configuration_info),
-                provider_configuration_info['issuer']
-            )
+def init_app(self, app, client_registration_info=None, issuer=None, provider_configuration_info=None):
+    self.app = app
 
-        self.client_registration_info = client_registration_info or {}
+    # Raise exception if oic auth will fail based on lack of data.
+    if not issuer and not provider_configuration_info:
+        raise ValueError(
+            'Either \'issuer\' (for dynamic discovery) or provider_configuration_info'
+            ' for static configuration must be specified.'
+        )
+    # If only issuer provided assume discovery and initalize anyway.
+    if issuer and not provider_configuration_info:
+        self.client.provider_config(issuer)
+    else:
+        # Otherwise assume non-discovery for oidc
+        self.client.handle_provider_config(
+            ProviderConfigurationResponse(**provider_configuration_info),
+            provider_configuration_info['issuer']
+        )
 
-        # setup redirect_uri as a flask route
-        self.app.add_url_rule('/redirect_uri', 'redirect_uri', self._handle_authentication_response)
+    self.client_registration_info = client_registration_info or {}
 
-        # dynamically add the Flask redirect uri to the client info
-        with self.app.app_context():
-            self.client_registration_info['redirect_uris'] \
-                = url_for('redirect_uri')
+    # setup redirect_uri as a flask route
+    app.add_url_rule('/redirect_uri', 'redirect_uri', self._handle_authentication_response)
 
-        # if non-discovery client add the provided info from the constructor
-        if client_registration_info and 'client_id' in client_registration_info:
-            # static client info provided
-            self.client.store_registration_info(RegistrationRequest(**client_registration_info))
+    # dynamically add the Flask redirect uri to the client info
+    with app.app_context():
+        self.client_registration_info['redirect_uris'] = url_for('redirect_uri')
 
-        self.logout_view = None
-        self._error_view = None
+    # if non-discovery client add the provided info from the constructor
+    if 'client_id' in self.client_registration_info:
+        # static client info provided
+        self.client.store_registration_info(RegistrationRequest(**self.client_registration_info))
 
     def _authenticate(self, interactive=True):
         if 'client_id' not in self.client_registration_info:
